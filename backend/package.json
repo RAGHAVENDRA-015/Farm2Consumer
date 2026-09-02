@@ -1,0 +1,42 @@
+{
+  "name": "farmlink-backend",
+  "version": "1.0.0",
+  "description": "FarmLink - Farm-to-Consumer Digital Marketplace Backend API",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only -r dotenv/config src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:push": "prisma db push",
+    "prisma:seed": "tsx prisma/seed.ts"
+  },
+  "keywords": ["farm-to-consumer", "marketplace", "express", "typescript", "prisma", "firebase"],
+  "author": "Tech Harvest",
+  "license": "ISC",
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "cloudinary": "^2.5.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "express-rate-limit": "^7.4.1",
+    "firebase-admin": "^12.7.0",
+    "helmet": "^8.0.0",
+    "morgan": "^1.10.0",
+    "slugify": "^1.6.6",
+    "winston": "^3.17.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/morgan": "^1.9.9",
+    "@types/node": "^22.9.0",
+    "prisma": "^5.22.0",
+    "ts-node-dev": "^2.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

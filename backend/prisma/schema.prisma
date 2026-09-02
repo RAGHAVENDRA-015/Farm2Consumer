@@ -1,0 +1,310 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CUSTOMER
+  FARMER
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PREPARING
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum PaymentProvider {
+  CASH_ON_DELIVERY
+  RAZORPAY
+  MOCK_PAYMENT
+}
+
+enum ProductUnit {
+  KG
+  GRAM
+  PIECE
+  DOZEN
+  LITER
+  BUNCH
+  PACK
+}
+
+model User {
+  id           String         @id @default(uuid())
+  firebaseUid  String         @unique @map("firebase_uid")
+  name         String
+  email        String?        @unique
+  phone        String?        @unique
+  role         Role           @default(CUSTOMER)
+  isActive     Boolean        @default(true) @map("is_active")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  farmerProfile FarmerProfile?
+  addresses     Address[]
+  cart          Cart?
+  orders        Order[]
+  reviews       Review[]
+  notifications Notification[]
+
+  @@map("users")
+}
+
+model FarmerProfile {
+  id            String        @id @default(uuid())
+  userId        String        @unique @map("user_id")
+  farmName      String        @map("farm_name")
+  bio           String?       @db.Text
+  address       String
+  city          String
+  state         String
+  pincode       String
+  farmLatitude  Float?        @map("farm_latitude")
+  farmLongitude Float?        @map("farm_longitude")
+  rating        Float         @default(0.0)
+  isApproved    Boolean       @default(false) @map("is_approved")
+  approvedAt    DateTime?     @map("approved_at")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  products      Product[]
+  sellerOrders  SellerOrder[]
+
+  @@map("farmer_profiles")
+}
+
+model Category {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  slug        String    @unique
+  description String?   @db.Text
+  imageUrl    String?   @map("image_url")
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  products    Product[]
+
+  @@map("categories")
+}
+
+model Product {
+  id                   String         @id @default(uuid())
+  farmerId             String         @map("farmer_id")
+  categoryId           String         @map("category_id")
+  name                 String
+  slug                 String
+  description          String         @db.Text
+  price                Float
+  unit                 ProductUnit    @default(KG)
+  stockQuantity        Float          @map("stock_quantity")
+  minimumOrderQuantity Float          @default(1.0) @map("minimum_order_quantity")
+  harvestDate          DateTime?      @map("harvest_date")
+  isOrganic            Boolean        @default(false) @map("is_organic")
+  isActive             Boolean        @default(true) @map("is_active")
+  isDeleted            Boolean        @default(false) @map("is_deleted")
+  createdAt            DateTime       @default(now()) @map("created_at")
+  updatedAt            DateTime       @updatedAt @map("updated_at")
+
+  farmer               FarmerProfile  @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+  category             Category       @relation(fields: [categoryId], references: [id])
+  images               ProductImage[]
+  cartItems            CartItem[]
+  orderItems           OrderItem[]
+  reviews              Review[]
+
+  @@index([farmerId])
+  @@index([categoryId])
+  @@index([name])
+  @@map("products")
+}
+
+model ProductImage {
+  id                 String   @id @default(uuid())
+  productId          String   @map("product_id")
+  cloudinaryPublicId String?  @map("cloudinary_public_id")
+  imageUrl           String   @map("image_url")
+  displayOrder       Int      @default(0) @map("display_order")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  product            Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@map("product_images")
+}
+
+model Address {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  name        String
+  phone       String
+  addressLine String   @map("address_line")
+  city        String
+  state       String
+  pincode     String
+  latitude    Float?
+  longitude   Float?
+  isDefault   Boolean  @default(false) @map("is_default")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("addresses")
+}
+
+model Cart {
+  id        String     @id @default(uuid())
+  userId    String     @unique @map("user_id")
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     CartItem[]
+
+  @@map("carts")
+}
+
+model CartItem {
+  id        String   @id @default(uuid())
+  cartId    String   @map("cart_id")
+  productId String   @map("product_id")
+  quantity  Float
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, productId])
+  @@map("cart_items")
+}
+
+model Order {
+  id              String        @id @default(uuid())
+  customerId      String        @map("customer_id")
+  orderNumber     String        @unique @map("order_number")
+  totalAmount     Float         @map("total_amount")
+  paymentStatus   PaymentStatus @default(PENDING) @map("payment_status")
+  status          OrderStatus   @default(PENDING)
+  deliveryAddress Json          @map("delivery_address")
+  notes           String?       @db.Text
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  customer        User          @relation(fields: [customerId], references: [id])
+  sellerOrders    SellerOrder[]
+  payments        Payment[]
+
+  @@index([customerId])
+  @@map("orders")
+}
+
+model SellerOrder {
+  id        String      @id @default(uuid())
+  orderId   String      @map("order_id")
+  farmerId  String      @map("farmer_id")
+  subtotal  Float
+  status    OrderStatus @default(PENDING)
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  order      Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  farmer     FarmerProfile @relation(fields: [farmerId], references: [id])
+  orderItems OrderItem[]
+
+  @@index([orderId])
+  @@index([farmerId])
+  @@map("seller_orders")
+}
+
+model OrderItem {
+  id            String      @id @default(uuid())
+  sellerOrderId String      @map("seller_order_id")
+  productId     String      @map("product_id")
+  productName   String      @map("product_name")
+  quantity      Float
+  priceAtOrder  Float       @map("price_at_order")
+  unit          ProductUnit @default(KG)
+  subtotal      Float
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  sellerOrder   SellerOrder @relation(fields: [sellerOrderId], references: [id], onDelete: Cascade)
+  product       Product     @relation(fields: [productId], references: [id])
+
+  @@index([sellerOrderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+model Payment {
+  id                String          @id @default(uuid())
+  orderId           String          @map("order_id")
+  provider          PaymentProvider @default(CASH_ON_DELIVERY)
+  providerOrderId   String?         @map("provider_order_id")
+  providerPaymentId String?         @map("provider_payment_id")
+  amount            Float
+  currency          String          @default("INR")
+  status            PaymentStatus   @default(PENDING)
+  paymentMethod     String?         @map("payment_method")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+
+  order             Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("payments")
+}
+
+model Review {
+  id         String   @id @default(uuid())
+  productId  String   @map("product_id")
+  customerId String   @map("customer_id")
+  rating     Int
+  comment    String?  @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  customer   User     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, customerId])
+  @@index([productId])
+  @@index([customerId])
+  @@map("reviews")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  type      String
+  title     String
+  message   String   @db.Text
+  isRead    Boolean  @default(false) @map("is_read")
+  data      Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("notifications")
+}
