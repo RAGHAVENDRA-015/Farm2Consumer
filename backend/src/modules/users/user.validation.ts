@@ -44,3 +44,8 @@ export const addressIdParamSchema = {
     id: z.string().uuid('Invalid address ID'),
   }),
 };
+
+export type UpdateUserProfileDTO = z.infer<typeof updateUserProfileSchema.body>;
+export type CreateAddressDTO = z.infer<typeof createAddressSchema.body>;
+export type UpdateAddressDTO = z.infer<typeof updateAddressSchema.body>;
+

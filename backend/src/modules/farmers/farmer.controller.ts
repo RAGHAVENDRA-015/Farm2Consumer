@@ -88,4 +88,22 @@ export class FarmerController {
       next(error);
     }
   }
+
+  static async getPublicFarmers(_req: Request, res: Response, next: NextFunction) {
+    try {
+      const farmers = await FarmerService.getPublicFarmers();
+      return sendSuccess(res, farmers);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async getPublicFarmerById(req: Request, res: Response, next: NextFunction) {
+    try {
+      const farmer = await FarmerService.getPublicFarmerById(req.params.id);
+      return sendSuccess(res, farmer);
+    } catch (error) {
+      next(error);
+    }
+  }
 }

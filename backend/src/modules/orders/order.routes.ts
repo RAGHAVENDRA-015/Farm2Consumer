@@ -13,6 +13,7 @@ const router = Router();
 router.use(authenticate);
 
 router.post('/', validate(createOrderSchema), OrderController.create);
+router.post('/cod', validate(createOrderSchema), OrderController.create);
 router.get('/', validate(getOrdersQuerySchema), OrderController.getMyOrders);
 router.get('/:id', validate(orderIdParamSchema), OrderController.getById);
 router.post('/:id/cancel', validate(orderIdParamSchema), OrderController.cancel);

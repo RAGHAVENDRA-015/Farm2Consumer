@@ -10,6 +10,7 @@ import paymentRoutes from '../modules/payments/payment.routes';
 import reviewRoutes from '../modules/reviews/review.routes';
 import notificationRoutes from '../modules/notifications/notification.routes';
 import adminRoutes from '../modules/admin/admin.routes';
+import uploadRoutes from '../modules/uploads/upload.routes';
 
 const router = Router();
 
@@ -19,17 +20,15 @@ router.get('/', (_req, res) => {
     success: true,
     message: 'Welcome to FarmLink Backend REST API (v1)',
     version: '1.0.0',
-    documentation: {
+    endpoints: {
       health: '/health',
       categories: '/api/v1/categories',
       products: '/api/v1/products',
-      productsSearch: '/api/v1/products?search=tomato',
-      farmerDashboardBrowserTest: '/api/v1/farmer/dashboard?devUser=farmer',
-      adminDashboardBrowserTest: '/api/v1/admin/dashboard?devUser=admin',
-      farmerEarningsBrowserTest: '/api/v1/farmer/earnings?devUser=farmer',
-      adminAnalyticsBrowserTest: '/api/v1/admin/analytics?devUser=admin',
-      cartBrowserTest: '/api/v1/cart?devUser=customer',
-      myOrdersBrowserTest: '/api/v1/orders?devUser=customer',
+      cart: '/api/v1/cart',
+      orders: '/api/v1/orders',
+      farmer: '/api/v1/farmer',
+      admin: '/api/v1/admin',
+      uploads: '/api/v1/uploads',
     },
   });
 });
@@ -40,10 +39,13 @@ router.use('/categories', categoryRoutes);
 router.use('/products', productRoutes);
 router.use('/cart', cartRoutes);
 router.use('/orders', orderRoutes);
+router.use('/farmers', farmerRoutes);
 router.use('/farmer', farmerRoutes);
 router.use('/payments', paymentRoutes);
+router.use('/payment', paymentRoutes);
 router.use('/reviews', reviewRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/admin', adminRoutes);
+router.use('/uploads', uploadRoutes);
 
 export default router;

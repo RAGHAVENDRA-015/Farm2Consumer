@@ -63,9 +63,19 @@ export class OrderService {
     // 3. Database Transaction
     return prisma.$transaction(async (tx) => {
       let grandTotal = 0;
-      const farmerGroups: Record<string, typeof cart.items> = {};
+      const farmerGroups: Record<
+        string,
+        Array<{
+          productId: string;
+          productName: string;
+          quantity: number;
+          priceAtOrder: number;
+          unit: any;
+          subtotal: number;
+        }>
+      > = {};
 
-      // Verify each item's stock, status, farmer approval
+      // Verify each item's stock, status, farmer approval & decrement atomically
       for (const item of cart.items) {
         const freshProduct = await tx.product.findUnique({
           where: { id: item.productId },
@@ -93,9 +103,14 @@ export class OrderService {
           );
         }
 
-        // Decrement product stock
-        await tx.product.update({
-          where: { id: freshProduct.id },
+        // Atomic conditional decrement to eliminate overselling race condition
+        const decrementResult = await tx.product.updateMany({
+          where: {
+            id: freshProduct.id,
+            isDeleted: false,
+            isActive: true,
+            stockQuantity: { gte: item.quantity },
+          },
           data: {
             stockQuantity: {
               decrement: item.quantity,
@@ -103,45 +118,54 @@ export class OrderService {
           },
         });
 
+        if (decrementResult.count === 0) {
+          throw ApiError.badRequest(
+            `Insufficient stock for "${freshProduct.name}". Please adjust quantity.`,
+            'INSUFFICIENT_STOCK'
+          );
+        }
+
+        const itemSubtotal = item.quantity * freshProduct.price;
+        grandTotal += itemSubtotal;
+
         const farmerId = freshProduct.farmerId;
         if (!farmerGroups[farmerId]) {
           farmerGroups[farmerId] = [];
         }
-        farmerGroups[farmerId].push(item);
-        grandTotal += item.quantity * freshProduct.price;
+        farmerGroups[farmerId].push({
+          productId: freshProduct.id,
+          productName: freshProduct.name,
+          quantity: item.quantity,
+          priceAtOrder: freshProduct.price,
+          unit: freshProduct.unit,
+          subtotal: itemSubtotal,
+        });
       }
 
       const orderNumber = this.generateOrderNumber();
       const provider = data.paymentProvider || PaymentProvider.CASH_ON_DELIVERY;
+      const isCod = provider === PaymentProvider.CASH_ON_DELIVERY;
+      const initialStatus = isCod ? OrderStatus.PENDING : OrderStatus.CONFIRMED;
+      const deliveryFee = 30;
+      const finalTotalAmount = grandTotal + deliveryFee;
 
       // Create Parent Order
       const newOrder = await tx.order.create({
         data: {
           customerId: userId,
           orderNumber,
-          totalAmount: grandTotal,
-          paymentStatus: provider === PaymentProvider.CASH_ON_DELIVERY ? PaymentStatus.PENDING : PaymentStatus.PENDING,
-          status: OrderStatus.CONFIRMED,
+          totalAmount: finalTotalAmount,
+          paymentStatus: PaymentStatus.PENDING,
+          status: initialStatus,
           deliveryAddress: finalAddress,
           notes: data.notes || null,
+          paymentMethod: isCod ? 'CASH_ON_DELIVERY' : provider,
         },
       });
 
       // Create Seller Orders and Order Items
-      for (const [farmerId, items] of Object.entries(farmerGroups)) {
-        let sellerSubtotal = 0;
-        const sellerOrderItemsData = items.map((item) => {
-          const itemSubtotal = item.quantity * item.product.price;
-          sellerSubtotal += itemSubtotal;
-          return {
-            productId: item.productId,
-            productName: item.product.name,
-            quantity: item.quantity,
-            priceAtOrder: item.product.price,
-            unit: item.product.unit,
-            subtotal: itemSubtotal,
-          };
-        });
+      for (const [farmerId, sellerItems] of Object.entries(farmerGroups)) {
+        const sellerSubtotal = sellerItems.reduce((sum, i) => sum + i.subtotal, 0);
 
         const sellerOrder = await tx.sellerOrder.create({
           data: {
@@ -150,7 +174,7 @@ export class OrderService {
             subtotal: sellerSubtotal,
             status: OrderStatus.CONFIRMED,
             orderItems: {
-              create: sellerOrderItemsData,
+              create: sellerItems,
             },
           },
         });
@@ -177,7 +201,7 @@ export class OrderService {
         data: {
           orderId: newOrder.id,
           provider,
-          amount: grandTotal,
+          amount: finalTotalAmount,
           currency: 'INR',
           status: PaymentStatus.PENDING,
           paymentMethod: provider,
@@ -195,7 +219,7 @@ export class OrderService {
           userId,
           type: 'ORDER_PLACED',
           title: 'Order Confirmed',
-          message: `Your order #${orderNumber} for ₹${grandTotal} has been successfully placed!`,
+          message: `Your order #${orderNumber} for ₹${finalTotalAmount} has been successfully placed!`,
           data: { orderId: newOrder.id },
         },
       });
@@ -232,7 +256,18 @@ export class OrderService {
           sellerOrders: {
             include: {
               farmer: { select: { id: true, farmName: true, city: true, state: true } },
-              orderItems: true,
+              orderItems: {
+                include: {
+                  product: {
+                    select: {
+                      id: true,
+                      name: true,
+                      unit: true,
+                      images: { take: 1, select: { imageUrl: true } },
+                    },
+                  },
+                },
+              },
             },
           },
           payments: true,
@@ -243,8 +278,24 @@ export class OrderService {
       }),
     ]);
 
+    const transformedItems = items.map((order) => ({
+      ...order,
+      sellerOrders: order.sellerOrders.map((so) => {
+        const mappedItems = so.orderItems.map((oi) => ({
+          ...oi,
+          price: oi.priceAtOrder,
+          product: oi.product || { id: oi.productId, name: oi.productName, unit: oi.unit },
+        }));
+        return {
+          ...so,
+          orderItems: mappedItems,
+          items: mappedItems,
+        };
+      }),
+    }));
+
     return {
-      items,
+      items: transformedItems,
       pagination: buildPaginationMeta(total, page, limit),
     };
   }
@@ -286,7 +337,57 @@ export class OrderService {
       throw ApiError.forbidden('You can only view your own orders', 'FORBIDDEN');
     }
 
-    return order;
+    const transformedOrder = {
+      ...order,
+      sellerOrders: order.sellerOrders.map((so) => {
+        const mappedItems = so.orderItems.map((oi) => ({
+          ...oi,
+          price: oi.priceAtOrder,
+          product: oi.product || { id: oi.productId, name: oi.productName, unit: oi.unit },
+        }));
+        return {
+          ...so,
+          orderItems: mappedItems,
+          items: mappedItems,
+        };
+      }),
+    };
+
+    return transformedOrder;
+  }
+
+  static async recomputeParentOrderStatus(tx: Prisma.TransactionClient, orderId: string): Promise<OrderStatus> {
+    const sellerOrders = await tx.sellerOrder.findMany({
+      where: { orderId },
+      select: { status: true },
+    });
+
+    if (sellerOrders.length === 0) return OrderStatus.PENDING;
+
+    const statuses = sellerOrders.map((s) => s.status);
+    let newStatus: OrderStatus = OrderStatus.CONFIRMED;
+
+    if (statuses.every((s) => s === OrderStatus.CANCELLED)) {
+      newStatus = OrderStatus.CANCELLED;
+    } else if (
+      statuses.every((s) => s === OrderStatus.DELIVERED || s === OrderStatus.CANCELLED) &&
+      statuses.some((s) => s === OrderStatus.DELIVERED)
+    ) {
+      newStatus = OrderStatus.DELIVERED;
+    } else if (statuses.some((s) => s === OrderStatus.OUT_FOR_DELIVERY)) {
+      newStatus = OrderStatus.OUT_FOR_DELIVERY;
+    } else if (statuses.some((s) => s === OrderStatus.PREPARING)) {
+      newStatus = OrderStatus.PREPARING;
+    } else if (statuses.every((s) => s === OrderStatus.CONFIRMED || s === OrderStatus.CANCELLED)) {
+      newStatus = OrderStatus.CONFIRMED;
+    }
+
+    await tx.order.update({
+      where: { id: orderId },
+      data: { status: newStatus },
+    });
+
+    return newStatus;
   }
 
   static async cancelOrder(orderId: string, userId: string, isAdmin = false) {
@@ -314,23 +415,39 @@ export class OrderService {
       );
     }
 
+    const hasStartedFulfillment = order.sellerOrders.some(
+      (so) =>
+        so.status === OrderStatus.PREPARING ||
+        so.status === OrderStatus.OUT_FOR_DELIVERY ||
+        so.status === OrderStatus.DELIVERED
+    );
+
+    if (hasStartedFulfillment) {
+      throw ApiError.badRequest(
+        'Cannot cancel order because fulfillment has already begun or been completed by the seller(s).',
+        'CANNOT_CANCEL'
+      );
+    }
+
     return prisma.$transaction(async (tx) => {
-      // 1. Restore product inventory
+      // 1. Restore product inventory for active seller orders
       for (const sOrder of order.sellerOrders) {
-        for (const item of sOrder.orderItems) {
-          await tx.product.update({
-            where: { id: item.productId },
-            data: {
-              stockQuantity: { increment: item.quantity },
-            },
+        if (sOrder.status !== OrderStatus.CANCELLED) {
+          for (const item of sOrder.orderItems) {
+            await tx.product.update({
+              where: { id: item.productId },
+              data: {
+                stockQuantity: { increment: item.quantity },
+              },
+            });
+          }
+
+          // Update seller order status
+          await tx.sellerOrder.update({
+            where: { id: sOrder.id },
+            data: { status: OrderStatus.CANCELLED },
           });
         }
-
-        // Update seller order status
-        await tx.sellerOrder.update({
-          where: { id: sOrder.id },
-          data: { status: OrderStatus.CANCELLED },
-        });
       }
 
       // 2. Update order status
@@ -394,8 +511,21 @@ export class OrderService {
       }),
     ]);
 
+    const transformedItems = items.map((so) => {
+      const mappedItems = so.orderItems.map((oi) => ({
+        ...oi,
+        price: oi.priceAtOrder,
+        product: oi.product || { id: oi.productId, name: oi.productName, unit: oi.unit },
+      }));
+      return {
+        ...so,
+        orderItems: mappedItems,
+        items: mappedItems,
+      };
+    });
+
     return {
-      items,
+      items: transformedItems,
       pagination: buildPaginationMeta(total, page, limit),
     };
   }
@@ -403,7 +533,11 @@ export class OrderService {
   static async updateFarmerOrderStatus(farmerId: string, sellerOrderId: string, newStatus: OrderStatus) {
     const sellerOrder = await prisma.sellerOrder.findFirst({
       where: { id: sellerOrderId, farmerId },
-      include: { order: true },
+      include: {
+        order: true,
+        orderItems: true,
+        farmer: { select: { farmName: true } },
+      },
     });
 
     if (!sellerOrder) {
@@ -429,22 +563,40 @@ export class OrderService {
       );
     }
 
-    const updated = await prisma.sellerOrder.update({
-      where: { id: sellerOrderId },
-      data: { status: newStatus },
-    });
+    return prisma.$transaction(async (tx) => {
+      // If farmer cancels seller order, restore inventory for their items
+      if (newStatus === OrderStatus.CANCELLED && sellerOrder.status !== OrderStatus.CANCELLED) {
+        for (const item of sellerOrder.orderItems) {
+          await tx.product.update({
+            where: { id: item.productId },
+            data: {
+              stockQuantity: { increment: item.quantity },
+            },
+          });
+        }
+      }
 
-    // Notify Customer about status change
-    await prisma.notification.create({
-      data: {
-        userId: sellerOrder.order.customerId,
-        type: 'ORDER_STATUS_UPDATED',
-        title: 'Order Status Updated',
-        message: `Your items in order #${sellerOrder.order.orderNumber} are now ${newStatus}.`,
-        data: { orderId: sellerOrder.orderId, sellerOrderId },
-      },
-    });
+      const updated = await tx.sellerOrder.update({
+        where: { id: sellerOrderId },
+        data: { status: newStatus },
+      });
 
-    return updated;
+      // Recompute parent order status from all child seller orders
+      await this.recomputeParentOrderStatus(tx, sellerOrder.orderId);
+
+      // Notify Customer about status change
+      await tx.notification.create({
+        data: {
+          userId: sellerOrder.order.customerId,
+          type: 'ORDER_STATUS_UPDATED',
+          title: 'Order Status Updated',
+          message: `Your items from ${sellerOrder.farmer.farmName} in order #${sellerOrder.order.orderNumber} are now ${newStatus}.`,
+          data: { orderId: sellerOrder.orderId, sellerOrderId },
+        },
+      });
+
+      return updated;
+    });
   }
 }
+

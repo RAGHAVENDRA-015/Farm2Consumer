@@ -22,3 +22,6 @@ export const updateOrderStatusSchema = {
     status: z.nativeEnum(OrderStatus),
   }),
 };
+
+export type UpdateFarmerProfileDTO = z.infer<typeof updateFarmerProfileSchema.body>;
+

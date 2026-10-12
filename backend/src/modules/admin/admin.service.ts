@@ -14,7 +14,7 @@ export class AdminService {
       totalOrders,
       completedOrders,
       cancelledOrders,
-      orders,
+      revenueAggregate,
     ] = await Promise.all([
       prisma.user.count({ where: { role: Role.CUSTOMER } }),
       prisma.farmerProfile.count(),
@@ -23,15 +23,29 @@ export class AdminService {
       prisma.order.count(),
       prisma.order.count({ where: { status: OrderStatus.DELIVERED } }),
       prisma.order.count({ where: { status: OrderStatus.CANCELLED } }),
-      prisma.order.findMany({
+      prisma.order.aggregate({
         where: { status: { not: OrderStatus.CANCELLED } },
-        select: { totalAmount: true },
+        _sum: { totalAmount: true },
       }),
     ]);
 
-    const totalRevenue = orders.reduce((sum, o) => sum + o.totalAmount, 0);
+    const totalRevenue = revenueAggregate._sum.totalAmount || 0;
     const commissionPercent = env.PLATFORM_COMMISSION_PERCENTAGE;
     const platformCommission = (totalRevenue * commissionPercent) / 100;
+
+    const recentOrders = await prisma.order.findMany({
+      take: 10,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        orderNumber: true,
+        totalAmount: true,
+        status: true,
+        paymentStatus: true,
+        createdAt: true,
+        customer: { select: { id: true, name: true, phone: true } },
+      },
+    });
 
     return {
       totalCustomers,
@@ -44,6 +58,7 @@ export class AdminService {
       cancelledOrders,
       totalRevenue,
       platformCommission,
+      recentOrders,
     };
   }
 
@@ -181,10 +196,52 @@ export class AdminService {
     };
   }
 
-  static async updateUserStatus(userId: string, isActive: boolean) {
+  static async updateUserStatus(currentAdminId: string, targetUserId: string, isActive: boolean) {
+    if (currentAdminId === targetUserId && !isActive) {
+      throw ApiError.badRequest('Administrators cannot deactivate their own account', 'CANNOT_DEACTIVATE_SELF');
+    }
+
+    const targetUser = await prisma.user.findUnique({ where: { id: targetUserId } });
+    if (!targetUser) {
+      throw ApiError.notFound('User not found', 'NOT_FOUND');
+    }
+
+    if (targetUser.role === Role.ADMIN && !isActive) {
+      const activeAdminCount = await prisma.user.count({
+        where: { role: Role.ADMIN, isActive: true },
+      });
+      if (activeAdminCount <= 1) {
+        throw ApiError.badRequest('Cannot deactivate the last active administrator', 'LAST_ADMIN_LOCKOUT');
+      }
+    }
+
     return prisma.user.update({
-      where: { id: userId },
+      where: { id: targetUserId },
       data: { isActive },
+    });
+  }
+
+  static async updateUserRole(currentAdminId: string, targetUserId: string, newRole: Role) {
+    const targetUser = await prisma.user.findUnique({ where: { id: targetUserId } });
+    if (!targetUser) {
+      throw ApiError.notFound('User not found', 'NOT_FOUND');
+    }
+
+    if (targetUser.role === Role.ADMIN && newRole !== Role.ADMIN) {
+      if (currentAdminId === targetUserId) {
+        throw ApiError.badRequest('You cannot demote your own admin account', 'CANNOT_DEMOTE_SELF');
+      }
+      const activeAdminCount = await prisma.user.count({
+        where: { role: Role.ADMIN, isActive: true },
+      });
+      if (activeAdminCount <= 1) {
+        throw ApiError.badRequest('Cannot demote the last active administrator', 'LAST_ADMIN_LOCKOUT');
+      }
+    }
+
+    return prisma.user.update({
+      where: { id: targetUserId },
+      data: { role: newRole },
     });
   }
 

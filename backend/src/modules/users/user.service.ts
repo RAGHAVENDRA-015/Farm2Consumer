@@ -1,6 +1,8 @@
 import { prisma } from '../../config/database';
 import { ApiError } from '../../utils/apiError';
 
+import { CreateAddressDTO, UpdateAddressDTO } from './user.validation';
+
 export class UserService {
   static async getProfile(userId: string) {
     const user = await prisma.user.findUnique({
@@ -40,9 +42,11 @@ export class UserService {
     });
   }
 
-  static async createAddress(userId: string, data: any) {
+  static async createAddress(userId: string, data: CreateAddressDTO) {
+    let isDefault = data.isDefault;
+
     // If setting as default, unset previous default
-    if (data.isDefault) {
+    if (isDefault) {
       await prisma.address.updateMany({
         where: { userId, isDefault: true },
         data: { isDefault: false },
@@ -51,19 +55,20 @@ export class UserService {
       // If this is the user's first address, make it default automatically
       const count = await prisma.address.count({ where: { userId } });
       if (count === 0) {
-        data.isDefault = true;
+        isDefault = true;
       }
     }
 
     return prisma.address.create({
       data: {
         ...data,
+        isDefault,
         userId,
       },
     });
   }
 
-  static async updateAddress(userId: string, addressId: string, data: any) {
+  static async updateAddress(userId: string, addressId: string, data: UpdateAddressDTO) {
     const address = await prisma.address.findFirst({
       where: { id: addressId, userId },
     });

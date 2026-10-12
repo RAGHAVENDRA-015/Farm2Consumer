@@ -7,6 +7,7 @@ import {
   farmerIdParamSchema,
   userIdParamSchema,
   updateUserStatusSchema,
+  updateUserRoleSchema,
 } from './admin.validation';
 import { productIdParamSchema } from '../products/product.validation';
 
@@ -24,6 +25,7 @@ router.patch('/farmers/:id/reject', validate(farmerIdParamSchema), AdminControll
 
 router.get('/customers', AdminController.getCustomers);
 router.patch('/users/:id/status', validate(updateUserStatusSchema), AdminController.updateUserStatus);
+router.patch('/users/:id/role', validate(updateUserRoleSchema), AdminController.updateUserRole);
 
 router.get('/products', AdminController.getProducts);
 router.delete('/products/:id', validate(productIdParamSchema), AdminController.deleteProduct);

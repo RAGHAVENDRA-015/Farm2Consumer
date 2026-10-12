@@ -1,25 +1,19 @@
+import { OrderStatus } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { ApiError } from '../../utils/apiError';
 import { parsePagination, buildPaginationMeta } from '../../utils/pagination';
+import { env } from '../../config/env';
 
 export class ReviewService {
   private static async recalculateFarmerRating(farmerId: string) {
-    const reviews = await prisma.review.findMany({
+    const agg = await prisma.review.aggregate({
       where: {
         product: { farmerId },
       },
-      select: { rating: true },
+      _avg: { rating: true },
     });
 
-    if (reviews.length === 0) {
-      await prisma.farmerProfile.update({
-        where: { id: farmerId },
-        data: { rating: 0.0 },
-      });
-      return;
-    }
-
-    const avg = reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length;
+    const avg = agg._avg.rating || 0.0;
     await prisma.farmerProfile.update({
       where: { id: farmerId },
       data: { rating: Math.round(avg * 10) / 10 },
@@ -39,12 +33,14 @@ export class ReviewService {
       throw ApiError.notFound('Product not found', 'PRODUCT_NOT_FOUND');
     }
 
-    // Check if user has purchased this product
+    // Check if user has purchased this product (non-cancelled order)
     const orderWithProduct = await prisma.order.findFirst({
       where: {
         customerId: userId,
+        status: { notIn: [OrderStatus.CANCELLED] },
         sellerOrders: {
           some: {
+            status: { not: OrderStatus.CANCELLED },
             orderItems: {
               some: { productId },
             },
@@ -53,14 +49,15 @@ export class ReviewService {
       },
     });
 
-    if (!orderWithProduct) {
+    // In strict production, require order; in development/demo allow authenticated customers to review
+    if (env.NODE_ENV === 'production' && !env.ENABLE_DEV_AUTH && !orderWithProduct) {
       throw ApiError.forbidden(
         'Only verified purchasers who have ordered this product can write a review.',
         'VERIFIED_PURCHASE_REQUIRED'
       );
     }
 
-    // Check if user already reviewed this product
+    // Check if user already reviewed this product; if so, update gracefully
     const existingReview = await prisma.review.findUnique({
       where: {
         productId_customerId: {
@@ -71,10 +68,19 @@ export class ReviewService {
     });
 
     if (existingReview) {
-      throw ApiError.conflict(
-        'You have already submitted a review for this product. You can update your existing review.',
-        'REVIEW_ALREADY_EXISTS'
-      );
+      const updatedReview = await prisma.review.update({
+        where: { id: existingReview.id },
+        data: {
+          rating: data.rating,
+          comment: data.comment || null,
+        },
+        include: {
+          customer: { select: { id: true, name: true } },
+        },
+      });
+
+      await this.recalculateFarmerRating(product.farmerId);
+      return updatedReview;
     }
 
     const review = await prisma.review.create({

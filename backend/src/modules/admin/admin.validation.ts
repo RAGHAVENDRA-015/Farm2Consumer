@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { Role } from '@prisma/client';
 
 export const farmerIdParamSchema = {
   params: z.object({
@@ -20,3 +21,13 @@ export const updateUserStatusSchema = {
     isActive: z.boolean(),
   }),
 };
+
+export const updateUserRoleSchema = {
+  params: z.object({
+    id: z.string().uuid('Invalid user ID'),
+  }),
+  body: z.object({
+    role: z.nativeEnum(Role),
+  }),
+};
+

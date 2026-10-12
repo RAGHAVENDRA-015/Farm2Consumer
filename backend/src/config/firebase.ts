@@ -1,5 +1,6 @@
 import * as admin from 'firebase-admin';
 import { env } from './env';
+import { logger } from '../utils/logger';
 
 let firebaseAdminApp: admin.app.App | null = null;
 
@@ -23,9 +24,9 @@ export function getFirebaseAdmin(): admin.app.App {
         privateKey: formattedPrivateKey,
       }),
     });
-    console.log('✅ Firebase Admin SDK initialized successfully');
+    logger.info('Firebase Admin SDK initialized successfully');
   } else {
-    console.warn('⚠️ Firebase Admin SDK credentials not fully configured. Using default application credentials if available.');
+    logger.warn('Firebase Admin SDK credentials not fully configured. Using default application credentials if available.');
     firebaseAdminApp = admin.initializeApp();
   }
 
@@ -33,3 +34,4 @@ export function getFirebaseAdmin(): admin.app.App {
 }
 
 export const firebaseAuth = () => getFirebaseAdmin().auth();
+

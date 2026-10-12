@@ -1,0 +1,19 @@
+{
+  "name": "farm2consumer",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RAGHAVENDRA-015/Farm2Consumer.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/RAGHAVENDRA-015/Farm2Consumer/issues"
+  },
+  "homepage": "https://github.com/RAGHAVENDRA-015/Farm2Consumer#readme"
+}

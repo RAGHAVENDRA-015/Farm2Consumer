@@ -1,6 +1,20 @@
 import { z } from 'zod';
 import { ProductUnit } from '@prisma/client';
 
+const imageUrlSchema = z
+  .string()
+  .min(1, 'Image URL is required')
+  .refine(
+    (val) =>
+      val.startsWith('http://') ||
+      val.startsWith('https://') ||
+      val.startsWith('/') ||
+      val.startsWith('data:image/'),
+    {
+      message: 'Invalid image URL format',
+    }
+  );
+
 export const createProductSchema = {
   body: z.object({
     categoryId: z.string().uuid('Valid Category ID is required'),
@@ -9,13 +23,14 @@ export const createProductSchema = {
     price: z.number().positive('Price must be greater than 0'),
     unit: z.nativeEnum(ProductUnit).default(ProductUnit.KG),
     stockQuantity: z.number().nonnegative('Stock quantity cannot be negative'),
-    minimumOrderQuantity: z.number().positive().default(1.0),
+    minimumOrderQuantity: z.number().positive().optional().default(1.0),
+    minOrderQuantity: z.number().positive().optional(),
     harvestDate: z.string().datetime().optional().nullable(),
     isOrganic: z.boolean().default(false),
     images: z
       .array(
         z.object({
-          imageUrl: z.string().url('Invalid image URL'),
+          imageUrl: imageUrlSchema,
           cloudinaryPublicId: z.string().optional().nullable(),
           displayOrder: z.number().int().optional().default(0),
         })
@@ -38,13 +53,14 @@ export const updateProductSchema = {
     unit: z.nativeEnum(ProductUnit).optional(),
     stockQuantity: z.number().nonnegative().optional(),
     minimumOrderQuantity: z.number().positive().optional(),
+    minOrderQuantity: z.number().positive().optional(),
     harvestDate: z.string().datetime().optional().nullable(),
     isOrganic: z.boolean().optional(),
     isActive: z.boolean().optional(),
     images: z
       .array(
         z.object({
-          imageUrl: z.string().url(),
+          imageUrl: imageUrlSchema,
           cloudinaryPublicId: z.string().optional().nullable(),
           displayOrder: z.number().int().optional().default(0),
         })
@@ -83,3 +99,8 @@ export const getProductsQuerySchema = {
     limit: z.string().optional(),
   }),
 };
+
+export type CreateProductDTO = z.infer<typeof createProductSchema.body>;
+export type UpdateProductDTO = z.infer<typeof updateProductSchema.body>;
+export type UpdateStockDTO = z.infer<typeof updateStockSchema.body>;
+

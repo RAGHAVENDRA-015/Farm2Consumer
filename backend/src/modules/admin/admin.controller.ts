@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { AdminService } from './admin.service';
 import { ProductService } from '../products/product.service';
 import { sendSuccess, sendPaginated } from '../../utils/response';
+import { ApiError } from '../../utils/apiError';
 
 export class AdminController {
   static async getDashboard(_req: Request, res: Response, next: NextFunction) {
@@ -60,7 +61,18 @@ export class AdminController {
 
   static async updateUserStatus(req: Request, res: Response, next: NextFunction) {
     try {
-      const updated = await AdminService.updateUserStatus(req.params.id, req.body.isActive);
+      if (!req.user) throw ApiError.unauthorized();
+      const updated = await AdminService.updateUserStatus(req.user.id, req.params.id, req.body.isActive);
+      return sendSuccess(res, updated);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async updateUserRole(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw ApiError.unauthorized();
+      const updated = await AdminService.updateUserRole(req.user.id, req.params.id, req.body.role);
       return sendSuccess(res, updated);
     } catch (error) {
       next(error);

@@ -4,15 +4,16 @@ import { prisma } from '../../config/database';
 import { ApiError } from '../../utils/apiError';
 import { parsePagination, buildPaginationMeta } from '../../utils/pagination';
 
+import { CreateProductDTO, UpdateProductDTO } from './product.validation';
+
 export class ProductService {
   static async getAll(queryParams: any) {
     const { page, limit, skip } = parsePagination(queryParams);
-    const { search, category, farmerId, minPrice, maxPrice, unit, isOrganic, sort } = queryParams;
+    const { search, category, farmerId, minPrice, maxPrice, unit, isOrganic, sort, includeInactive } = queryParams;
 
     const where: Prisma.ProductWhereInput = {
       isDeleted: false,
-      isActive: true,
-      farmer: { isApproved: true },
+      ...(includeInactive ? {} : { isActive: true, farmer: { isApproved: true } }),
     };
 
     if (search) {
@@ -100,14 +101,10 @@ export class ProductService {
             id: true,
             farmName: true,
             bio: true,
-            address: true,
             city: true,
             state: true,
-            pincode: true,
-            farmLatitude: true,
-            farmLongitude: true,
             rating: true,
-            user: { select: { name: true, phone: true } },
+            user: { select: { name: true } },
           },
         },
         images: {
@@ -130,7 +127,7 @@ export class ProductService {
     return product;
   }
 
-  static async create(farmerId: string, data: any) {
+  static async create(farmerId: string, data: CreateProductDTO) {
     // Verify category exists
     const category = await prisma.category.findUnique({
       where: { id: data.categoryId },
@@ -140,11 +137,13 @@ export class ProductService {
     }
 
     const slug = slugify(`${data.name}-${Date.now()}`, { lower: true, strict: true });
-    const { images = [], ...productData } = data;
+    const { images = [], minOrderQuantity, ...productData } = data as any;
+    const finalMinOrderQty = productData.minimumOrderQuantity || minOrderQuantity || 1.0;
 
     return prisma.product.create({
       data: {
         ...productData,
+        minimumOrderQuantity: finalMinOrderQty,
         slug,
         farmerId,
         images: {
@@ -162,7 +161,7 @@ export class ProductService {
     });
   }
 
-  static async update(productId: string, farmerId: string, data: any, isAdmin = false) {
+  static async update(productId: string, farmerId: string, data: UpdateProductDTO, isAdmin = false) {
     const product = await prisma.product.findFirst({
       where: { id: productId, isDeleted: false },
     });
@@ -175,7 +174,19 @@ export class ProductService {
       throw ApiError.forbidden('You can only modify your own products', 'FORBIDDEN');
     }
 
-    const { images, ...updateData } = data;
+    if (data.categoryId) {
+      const category = await prisma.category.findUnique({
+        where: { id: data.categoryId },
+      });
+      if (!category) {
+        throw ApiError.badRequest('Invalid category ID provided', 'INVALID_CATEGORY');
+      }
+    }
+
+    const { images, minOrderQuantity, ...updateData } = data as any;
+    if (minOrderQuantity !== undefined && updateData.minimumOrderQuantity === undefined) {
+      updateData.minimumOrderQuantity = minOrderQuantity;
+    }
 
     return prisma.$transaction(async (tx) => {
       if (images) {

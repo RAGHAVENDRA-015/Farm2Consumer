@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { Prisma } from '@prisma/client';
 import { ApiError } from '../utils/apiError';
 import { logger } from '../utils/logger';
+import { env } from '../config/env';
 
 export const errorHandler = (
   err: Error,
@@ -67,7 +68,7 @@ export const errorHandler = (
     success: false,
     error: {
       code: 'INTERNAL_SERVER_ERROR',
-      message: process.env.NODE_ENV === 'production' ? 'An unexpected internal server error occurred.' : err.message,
+      message: env.NODE_ENV === 'production' ? 'An unexpected internal server error occurred.' : err.message,
     },
   });
 };
